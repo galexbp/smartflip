@@ -1,358 +1,161 @@
 // WEBAPP CREATED BY ALEXANDER BONE, HTTPS://WWW.ALEXBOPE75.COM
-const DEEPSEEK_API_KEY = 'YOUR_DEEPSEEK_API_HERE';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 
-export const generateFlashcards = async (content, type = 'describe') => {
+function getApiKey() {
+  if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem('smartflip_api_key');
+    if (stored) return stored;
+  }
+  return import.meta.env.VITE_DEEPSEEK_API_KEY || 'YOUR_DEEPSEEK_API_HERE';
+}
+
+const DIFFICULTY_HINTS = {
+  easy: 'Nivel básico: conceptos fundamentales, definiciones claras y preguntas directas.',
+  medium: 'Nivel intermedio: combina conceptos, requiere comprensión y algo de análisis.',
+  hard: 'Nivel avanzado: preguntas desafiantes, matices, excepciones y aplicación profunda.',
+};
+
+function parseJsonResponse(content) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    throw new Error('No se pudo parsear la respuesta como JSON');
+  }
+}
+
+async function callDeepSeek(prompt, maxTokens = 3000) {
+  const apiKey = getApiKey();
+
+  if (!apiKey || apiKey === 'YOUR_DEEPSEEK_API_HERE') {
+    throw new Error('Configura tu clave API de DeepSeek en Ajustes antes de generar contenido.');
+  }
+
+  const response = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: maxTokens,
+    }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('Clave API inválida. Revisa tu clave en Ajustes.');
+    }
+    throw new Error(`Error de API: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+function buildOptionsBlock(count, difficulty) {
+  const diffHint = DIFFICULTY_HINTS[difficulty] || DIFFICULTY_HINTS.medium;
+  return `
+Genera exactamente ${count} elementos.
+${diffHint}
+Responde ÚNICAMENTE con un array JSON válido. NO incluyas texto fuera del array JSON.`;
+}
+
+export const generateFlashcards = async (content, type = 'describe', options = {}) => {
+  const { count = 15, difficulty = 'medium' } = options;
   let prompt;
-  
+
   if (type === 'paste' || type === 'file') {
-    prompt = `Eres un asistente educativo especializado en crear tarjetas de estudio. Tu tarea es extraer el contenido más importante del siguiente texto y crear tarjetas de estudio efectivas.
+    prompt = `Eres un asistente educativo especializado en crear tarjetas de estudio efectivas.
 
 Texto a analizar:
 ${content}
 
-Instrucciones para crear las tarjetas:
-1. Identifica los términos, conceptos o frases más importantes del texto
-2. Para cada término, crea una definición clara y concisa basada en el texto
-3. Las tarjetas deben ser educativas y fáciles de entender
-4. Crea entre 5-50 tarjetas dependiendo del contenido disponible
-5. El frente debe ser conciso (1-10 palabras idealmente)
-6. El reverso debe ser claro y educativo (máximo 50 palabras)
+Instrucciones:
+1. Identifica los términos y conceptos más importantes del texto
+2. Frente conciso (1-10 palabras), reverso claro (máximo 50 palabras)
+3. Las tarjetas deben ser educativas y fáciles de estudiar
 
-Responde ÚNICAMENTE con un array JSON válido en este formato exacto:
-[
-  {
-    "front": "Término o concepto",
-    "back": "Definición o explicación clara"
-  }
-]
+Formato JSON:
+[{"front": "Término", "back": "Definición"}]
 
-NO incluyas texto fuera del array JSON.`;
+${buildOptionsBlock(count, difficulty)}`;
   } else {
-    prompt = `Eres un asistente educativo especializado en crear tarjetas de estudio. Tu tarea es crear tarjetas educativas sobre el tema: "${content}"
+    prompt = `Eres un asistente educativo. Crea tarjetas de estudio sobre: "${content}"
 
-Instrucciones para crear las tarjetas:
-1. Crea las tarjetas que consideres necesarias sobre el tema de estudio, mínimo 5 y máximo 50 tarjetas
-2. Cada tarjeta debe tener un término/concepto claro en el frente
-3. La definición del reverso debe ser educativa y precisa
-4. Adapta el enfoque según el tipo de tema:
-   - Ubicaciones: Usa el lugar como término y datos clave como definición
-   - Historia: Usa eventos/personas como términos y fechas/importancia como definiciones
-   - Ciencia: Usa conceptos como términos y explicaciones como definiciones
-   - Idiomas: Usa palabras en un idioma como términos y traducciones como definiciones
-5. El frente debe ser conciso (1-5 palabras idealmente)
-6. El reverso debe ser claro y educativo (máximo 50 palabras)
-7. Asegúrate de que las tarjetas sean visualmente atractivas y fáciles de estudiar.
-8. Evalúa qué preguntas o conceptos son más relevantes para el tema y exámenes.
+Adapta el enfoque al tema (ubicaciones, historia, ciencia, idiomas, etc.).
+Frente conciso, reverso educativo (máximo 50 palabras).
 
-Responde ÚNICAMENTE con un array JSON válido en este formato exacto:
-[
-  {
-    "front": "Término o concepto",
-    "back": "Definición o explicación clara"
-  }
-]
+Formato JSON:
+[{"front": "Término", "back": "Definición"}]
 
-NO incluyas texto fuera del array JSON.`;
+${buildOptionsBlock(count, difficulty)}`;
   }
 
-  try {
-    const response = await fetch(DEEPSEEK_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 2000
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Error de API: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices[0].message.content;
-    
-    try {
-      const flashcards = JSON.parse(content);
-      return flashcards;
-    } catch (parseError) {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      throw new Error('No se pudo parsear la respuesta como JSON');
-    }
-  } catch (error) {
-    console.error('Error al generar flashcards:', error);
-    throw error;
-  }
+  const raw = await callDeepSeek(prompt, 2500);
+  return parseJsonResponse(raw);
 };
 
-export const generateQuiz = async (content, type = 'describe') => {
+export const generateQuiz = async (content, type = 'describe', options = {}) => {
+  const { count = 15, difficulty = 'medium' } = options;
   let prompt;
-  
-  if (type === 'paste' || type === 'file') {
-    prompt = `Eres un asistente educativo especializado en crear preguntas de opción múltiple. Tu tarea es extraer el contenido más importante del siguiente texto y crear preguntas de opción múltiple con 4 opciones.
 
-Texto a analizar:
+  const formatHint = `Formato JSON:
+[{"question": "...", "options": ["A","B","C","D"], "correctAnswer": 0, "explanation": "..."}]`;
+
+  if (type === 'paste' || type === 'file') {
+    prompt = `Crea preguntas de opción múltiple (4 opciones, una correcta) basadas en:
+
 ${content}
 
-Instrucciones para crear las preguntas:
-1. Identifica los conceptos, hechos o términos clave del texto.
-2. Crea entre 5-50 preguntas dependiendo del contenido disponible.
-3. Cada pregunta debe tener:
-   - Un enunciado claro y conciso (máximo 100 palabras).
-   - Exactamente 4 opciones de respuesta, donde solo una es correcta.
-   - Un índice (0-3) que indique la opción correcta.
-   - Una explicación breve (máximo 50 palabras) de por qué la opción correcta es correcta y/o por qué las otras son incorrectas.
-4. Las preguntas deben ser educativas, relevantes y útiles para estudiar.
-5. Asegúrate de que las opciones incorrectas sean plausibles pero claramente incorrectas.
+Cada pregunta: enunciado claro, 4 opciones plausibles, índice correctAnswer (0-3), explicación breve.
 
-Responde ÚNICAMENTE con un array JSON válido en este formato exacto:
-[
-  {
-    "question": "Enunciado de la pregunta",
-    "options": ["Opción 1", "Opción 2", "Opción 3", "Opción 4"],
-    "correctAnswer": 0,
-    "explanation": "Explicación de la respuesta correcta"
-  }
-]
-
-NO incluyas texto fuera del array JSON.`;
+${formatHint}
+${buildOptionsBlock(count, difficulty)}`;
   } else {
-    prompt = `Eres un asistente educativo especializado en crear preguntas de opción múltiple. Tu tarea es crear preguntas educativas sobre el tema: "${content}"
+    prompt = `Crea preguntas de opción múltiple sobre el tema: "${content}"
 
-Instrucciones para crear las preguntas:
-1. Crea entre 5-50 preguntas sobre el tema, según su complejidad.
-2. Cada pregunta debe tener:
-   - Un enunciado claro y conciso (máximo 100 palabras).
-   - Exactamente 4 opciones de respuesta, donde solo una es correcta.
-   - Un índice (0-3) que indique la opción correcta.
-   - Una explicación breve (máximo 50 palabras) de por qué la opción correcta es correcta y/o por qué las otras son incorrectas.
-3. Adapta el enfoque según el tipo de tema:
-   - Ubicaciones: Pregunta sobre datos clave del lugar.
-   - Historia: Pregunta sobre eventos, fechas o personajes importantes.
-   - Ciencia: Pregunta sobre conceptos, procesos o aplicaciones.
-   - Idiomas: Pregunta sobre vocabulario, gramática o traducciones.
-4. Las preguntas deben ser educativas, relevantes y útiles para estudiar.
-5. Asegúrate de que las opciones incorrectas sean plausibles pero claramente incorrectas.
+4 opciones por pregunta, una correcta, explicación breve.
 
-Responde ÚNICAMENTE con un array JSON válido en este formato exacto:
-[
-  {
-    "question": "Enunciado de la pregunta",
-    "options": ["Opción 1", "Opción 2", "Opción 3", "Opción 4"],
-    "correctAnswer": 0,
-    "explanation": "Explicación de la respuesta correcta"
-  }
-]
-
-NO incluyas texto fuera del array JSON.`;
+${formatHint}
+${buildOptionsBlock(count, difficulty)}`;
   }
 
-  try {
-    const response = await fetch(DEEPSEEK_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 3000
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Error de API: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices[0].message.content;
-    
-    try {
-      const quizQuestions = JSON.parse(content);
-      return quizQuestions;
-    } catch (parseError) {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      throw new Error('No se pudo parsear la respuesta como JSON');
-    }
-  } catch (error) {
-    console.error('Error al generar quiz:', error);
-    throw error;
-  }
+  const raw = await callDeepSeek(prompt, 3500);
+  return parseJsonResponse(raw);
 };
 
-export const generatePracticeTest = async (content, type = 'describe') => {
+export const generatePracticeTest = async (content, type = 'describe', options = {}) => {
+  const { count = 20, difficulty = 'medium' } = options;
   let prompt;
-  
-  if (type === 'paste' || type === 'file') {
-    prompt = `Eres un asistente educativo especializado en crear pruebas prácticas. Tu tarea es extraer el contenido más importante del siguiente texto y crear una prueba con una mezcla de preguntas de opción múltiple, verdadero/falso, completar espacios y emparejamiento.
 
-Texto a analizar:
+  const formatHint = `Formato JSON con tipos "multiple", "truefalse", "fill", "match".
+Incluye al menos una pregunta de cada tipo en la mezcla.`;
+
+  if (type === 'paste' || type === 'file') {
+    prompt = `Crea una prueba práctica mixta basada en:
+
 ${content}
 
-Instrucciones para crear la prueba:
-1. Crea entre 5-50 preguntas, con al menos una de cada tipo (opción múltiple, verdadero/falso, completar espacios, emparejamiento).
-2. Cada pregunta debe tener:
-   - Un enunciado claro y conciso (máximo 100 palabras).
-   - Un tipo ("multiple", "truefalse", "fill", "match").
-   - Para "multiple": 4 opciones, un índice (0-3) de la respuesta correcta.
-   - Para "truefalse": Respuesta correcta como booleano (true/false).
-   - Para "fill": Respuesta correcta como texto (máximo 50 palabras).
-   - Para "match": Lista de opciones y respuestas correctas como arrays de igual longitud.
-   - Una explicación breve (máximo 50 palabras) de la respuesta correcta.
-3. Las preguntas deben ser educativas, relevantes y útiles para estudiar.
-4. Asegúrate de que las opciones incorrectas sean plausibles pero claramente incorrectas.
+Tipos: multiple (4 opciones), truefalse, fill (texto), match (options + matches + correctAnswer array).
 
-Responde ÚNICAMENTE con un array JSON válido en este formato exacto:
-[
-  {
-    "type": "multiple",
-    "question": "Enunciado de la pregunta",
-    "options": ["Opción 1", "Opción 2", "Opción 3", "Opción 4"],
-    "correctAnswer": 0,
-    "explanation": "Explicación de la respuesta correcta"
-  },
-  {
-    "type": "truefalse",
-    "question": "Enunciado de la pregunta",
-    "correctAnswer": true,
-    "explanation": "Explicación de la respuesta correcta"
-  },
-  {
-    "type": "fill",
-    "question": "Enunciado de la pregunta",
-    "correctAnswer": "Respuesta correcta",
-    "explanation": "Explicación de la respuesta correcta"
-  },
-  {
-    "type": "match",
-    "question": "Enunciado de la pregunta",
-    "options": ["Término 1", "Término 2", "Término 3"],
-    "matches": ["Definición 1", "Definición 2", "Definición 3"],
-    "correctAnswer": ["Definición 1", "Definición 2", "Definición 3"],
-    "explanation": "Explicación de la respuesta correcta"
-  }
-]
-
-NO incluyas texto fuera del array JSON.`;
+${formatHint}
+${buildOptionsBlock(count, difficulty)}`;
   } else {
-    prompt = `Eres un asistente educativo especializado en crear pruebas prácticas. Tu tarea es crear una prueba educativa sobre el tema: "${content}"
+    prompt = `Crea una prueba práctica mixta sobre: "${content}"
 
-Instrucciones para crear la prueba:
-1. Crea entre 15-50 preguntas, con al menos una de cada tipo (opción múltiple, verdadero/falso, completar espacios, emparejamiento).
-2. Cada pregunta debe tener:
-   - Un enunciado claro y conciso (máximo 100 palabras).
-   - Un tipo ("multiple", "truefalse", "fill", "match").
-   - Para "multiple": 4 opciones, un índice (0-3) de la respuesta correcta.
-   - Para "truefalse": Respuesta correcta como booleano (true/false).
-   - Para "fill": Respuesta correcta como texto (máximo 50 palabras).
-   - Para "match": Lista de opciones y respuestas correctas como arrays de igual longitud.
-   - Una explicación breve (máximo 50 palabras) de la respuesta correcta.
-3. Adapta el enfoque según el tipo de tema:
-   - Ubicaciones: Pregunta sobre datos clave del lugar.
-   - Historia: Pregunta sobre eventos, fechas o personajes importantes.
-   - Ciencia: Pregunta sobre conceptos, procesos o aplicaciones.
-   - Idiomas: Pregunta sobre vocabulario, gramática o traducciones.
-4. Las preguntas deben ser educativas, relevantes y útiles para estudiar.
-5. Asegúrate de que las opciones incorrectas sean plausibles pero claramente incorrectas.
+Tipos: multiple, truefalse, fill, match. Variedad de formatos.
 
-Responde ÚNICAMENTE con un array JSON válido en este formato exacto:
-[
-  {
-    "type": "multiple",
-    "question": "Enunciado de la pregunta",
-    "options": ["Opción 1", "Opción 2", "Opción 3", "Opción 4"],
-    "correctAnswer": 0,
-    "explanation": "Explicación de la respuesta correcta"
-  },
-  {
-    "type": "truefalse",
-    "question": "Enunciado de la pregunta",
-    "correctAnswer": true,
-    "explanation": "Explicación de la respuesta correcta"
-  },
-  {
-    "type": "fill",
-    "question": "Enunciado de la pregunta",
-    "correctAnswer": "Respuesta correcta",
-    "explanation": "Explicación de la respuesta correcta"
-  },
-  {
-    "type": "match",
-    "question": "Enunciado de la pregunta",
-    "options": ["Término 1", "Término 2", "Término 3"],
-    "matches": ["Definición 1", "Definición 2", "Definición 3"],
-    "correctAnswer": ["Definición 1", "Definición 2", "Definición 3"],
-    "explanation": "Explicación de la respuesta correcta"
-  }
-]
-
-NO incluyas texto fuera del array JSON.`;
+${formatHint}
+${buildOptionsBlock(count, difficulty)}`;
   }
 
-  try {
-    const response = await fetch(DEEPSEEK_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 4000
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices[0].message.content;
-    
-    try {
-      const testQuestions = JSON.parse(content);
-      return testQuestions;
-    } catch (parseError) {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      throw new Error('The response could not be parsed as JSON');
-    }
-  } catch (error) {
-    console.error('Error generating practice test:', error);
-    throw error;
-  }
+  const raw = await callDeepSeek(prompt, 4500);
+  return parseJsonResponse(raw);
 };
-// WEBAPP CREATED BY ALEXANDER BONE, HTTPS://WWW.ALEXBOPE75.COM
